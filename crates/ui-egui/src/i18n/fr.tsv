@@ -2369,7 +2369,6 @@
 	Delete Path	Supprimer le tracé
 	Auto-Hide	Masquage automatique
 	W	L
-	H	H
 	X	X
 	Y	Y
 	Frame Sync	Synchronisation des images
@@ -3238,3 +3237,7 @@ curves	Smooth	Lisser
 	Increase Brush Size	Augmenter la taille du pinceau
 	Decrease Brush Hardness	Réduire la dureté du pinceau
 	Increase Brush Hardness	Augmenter la dureté du pinceau
+	# Color Wheel labels
+	H	T
+	S	S
+	B	V
