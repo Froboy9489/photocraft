@@ -4075,18 +4075,21 @@ fn color_wheel(app: &mut PhotocraftApp, ui: &mut egui::Ui, bg_active: bool) {
     ui.painter().circle_stroke(marker, 5.0, Stroke::new(1.5, Color32::from_black_alpha(160)));
 
     // One interaction area: ring changes hue, triangle changes saturation/brightness.
-    // One interaction area: ring changes hue, triangle changes saturation/brightness.
+    // `press_origin` is cleared on the release frame, so remember where the
+    // press began while the button is down, and classify the click by that
+    // position.
+    if area_resp.is_pointer_button_down_on()
+        && let Some(origin) = ui.input(|i| i.pointer.press_origin())
+    {
+        app.ui.color_panel.wheel_press_origin = Some(origin);
+    }
     let active = area_resp.dragged() || area_resp.clicked();
     if active && let Some(p) = area_resp.interact_pointer_pos() {
         let offset = p - center;
         let angle = (offset.y.atan2(offset.x) / std::f32::consts::TAU + 1.0) % 1.0;
-        // `press_origin` is cleared on the release frame, so remember where the
-        // press began and classify the click by that position.
-        if let Some(origin) = ui.input(|i| i.pointer.press_origin()) {
-            app.ui.color_panel.wheel_press_origin = Some(origin);
-        }
         let origin = app.ui.color_panel.wheel_press_origin.unwrap_or(p);
-        match wheel_press_is_ring(origin, center, inner, outer) {
+        let hit = wheel_press_is_ring(origin, center, inner, outer);
+        match hit {
             Some(true) => hsva.h = angle,
             Some(false) => {
                 // Barycentric coordinates in the triangle.
@@ -4122,9 +4125,11 @@ fn color_wheel(app: &mut PhotocraftApp, ui: &mut egui::Ui, bg_active: bool) {
             None => {}
         }
 
-        let color = hsva_srgb(hsva);
-        set_tool_color(app, bg_active, color);
-        ui.data_mut(|d| d.insert_temp(wheel_key, (hsva.h, hsva.s)));
+        if hit.is_some() {
+            let color = hsva_srgb(hsva);
+            set_tool_color(app, bg_active, color);
+            ui.data_mut(|d| d.insert_temp(wheel_key, (hsva.h, hsva.s)));
+        }
     }
     if !area_resp.is_pointer_button_down_on() && !area_resp.clicked() {
         app.ui.color_panel.wheel_press_origin = None;
