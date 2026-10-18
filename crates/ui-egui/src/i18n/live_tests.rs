@@ -477,15 +477,9 @@ fn french_color_wheel_labels_are_translated() {
 fn color_wheel_contextual_labels_translate_without_changing_height() {
     let fr = lang("fr");
     let en = lang("en");
-
-    // Label contextuel de la roue : traduit en français
     assert_eq!(tr_ctx(fr, "color-wheel", "H"), "T");
     assert_eq!(tr_ctx(fr, "color-wheel", "S"), "S");
     assert_eq!(tr_ctx(fr, "color-wheel", "B"), "L");
-
-    // Fallback anglais : le texte anglais est conservé
     assert_eq!(tr_ctx(en, "color-wheel", "H"), "H");
-
-    // Label plain (hauteur) : non traduit en français
     assert_eq!(tr(fr, "H"), "H");
 }

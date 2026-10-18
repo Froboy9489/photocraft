@@ -909,7 +909,7 @@ impl craft_ui::docking::DockContent<String> for PanelContent<'_> {
         let resp = crate::icons::button(ui, "ellipsis", ui.available_height().min(28.0), false, tl!("Panel menu"));
         egui::Popup::menu(&resp).show(|ui| {
             ui.set_min_width(180.0);
-            if PANELS.iter().any(|&(id, _, group)| id == active && group == Group::Color) {
+            if active == "color" {
                 ui.separator();
 
                 if ui.selectable_label(!self.app.ui.color_panel.color_wheel, tl!("Hue Cube")).clicked() {
