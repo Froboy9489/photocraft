@@ -1,5 +1,4 @@
 //! Chrome around the canvas: title bar, options bar, toolbar, status bar, dock cards, Properties.
-
 use crate::mask_thumbs_ui::MaskKind;
 use crate::state::Tool;
 use crate::theme::{self, Tokens};
@@ -3833,7 +3832,6 @@ fn color_field(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let mut hsva = srgb_hsva(if bg_active { app.session.tools.background } else { app.session.tools.foreground });
     // A grey or black has no hue; keep the last meaningful hue/saturation for the wheel.
     // What the field showed last: a grey carries no hue, black neither hue nor saturation (#3228).
-    // What the field showed last: a grey carries no hue, black neither hue nor saturation (#3228).
     let remembered: (f32, f32) = ui.data(|d| d.get_temp(key)).unwrap_or((hsva.h, hsva.s));
     hsva = field_hsva(hsva, remembered);
     let w = ui.available_width();
@@ -3934,15 +3932,14 @@ fn color_field(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     });
 }
 /// HSV values displayed by the Color Wheel.
-///
 /// Grey colours have no meaningful hue, so the wheel keeps the last hue and
-/// saturation selected while its brightness remains at zero.
+/// saturation selected while preserving the current brightness.
 fn wheel_display_hsv(current: egui::ecolor::Hsva, remembered: (f32, f32)) -> egui::ecolor::Hsva {
     if current.v < 0.001 {
-        // Noir : teinte et saturation indéfinies, on restaure les deux
+        // Black: hue and saturation are undefined, restore both.
         egui::ecolor::Hsva::new(remembered.0, remembered.1, current.v, current.a)
     } else if current.s < 0.001 {
-        // Gris : saturation réelle = 0, mais on garde la teinte mémorisée
+        // Grey: actual saturation is 0, but keep the remembered hue.
         egui::ecolor::Hsva::new(remembered.0, 0.0, current.v, current.a)
     } else {
         current
@@ -3955,6 +3952,10 @@ fn set_tool_color(app: &mut PhotocraftApp, bg_active: bool, color: [f32; 4]) {
         app.session.tools.foreground = color;
         crate::type_tool::foreground_changed(app);
     }
+}
+/// Whether a press at `origin` targets the hue ring rather than the SV triangle.
+fn wheel_press_is_ring(origin: egui::Pos2, center: egui::Pos2, inner: f32) -> bool {
+    (origin - center).length() >= inner
 }
 /// Circular hue/saturation wheel with a brightness slider; an alternative to the SV field.
 fn color_wheel(app: &mut PhotocraftApp, ui: &mut egui::Ui, bg_active: bool) {
@@ -4076,12 +4077,12 @@ fn color_wheel(app: &mut PhotocraftApp, ui: &mut egui::Ui, bg_active: bool) {
     let active = area_resp.dragged() || area_resp.clicked();
     if active && let Some(p) = area_resp.interact_pointer_pos() {
         let offset = p - center;
-        let distance = offset.length();
         let angle = (offset.y.atan2(offset.x) / std::f32::consts::TAU + 1.0) % 1.0;
-
-        if distance >= inner - 3.0 {
+        let origin = ui.input(|i| i.pointer.press_origin()).unwrap_or(p);
+        if wheel_press_is_ring(origin, center, inner) {
             hsva.h = angle;
         } else {
+            // Barycentric coordinates in the triangle.
             let ax = hue_vertex.x;
             let ay = hue_vertex.y;
             let bx = white_vertex.x;
@@ -4094,7 +4095,7 @@ fn color_wheel(app: &mut PhotocraftApp, ui: &mut egui::Ui, bg_active: bool) {
                 let mut weight_hue = ((by - cy) * (p.x - cx) + (cx - bx) * (p.y - cy)) / denominator;
                 let mut weight_white = ((cy - ay) * (p.x - cx) + (ax - cx) * (p.y - cy)) / denominator;
                 let mut weight_black = 1.0 - weight_hue - weight_white;
-
+                // Clamp the point into the triangle.
                 let minimum = weight_hue.min(weight_white).min(weight_black);
                 if minimum < 0.0 {
                     weight_hue -= minimum;
@@ -6886,7 +6887,7 @@ mod color_wheel_tests {
 
         let displayed = wheel_display_hsv(current, remembered);
 
-        // Un gris garde la teinte mémorisée, avec une saturation nulle
+        // A grey keeps the remembered hue, with zero saturation.
         assert!((displayed.h - 120.0 / 360.0).abs() < 1e-6);
         assert!((displayed.s - 0.0).abs() < 1e-6);
         assert!((displayed.v - 0.5).abs() < 1e-6);
@@ -6916,16 +6917,19 @@ mod color_wheel_tests {
     }
     #[test]
     fn wheel_hue_only_edit_keeps_grey_achromatic() {
-        // Simule un gris actuel et une saturation mémorisée
+        // Simulate a current grey and a remembered saturation.
         let current = egui::ecolor::Hsva::new(240.0 / 360.0, 0.0, 0.5, 1.0);
         let remembered = (120.0 / 360.0, 0.8);
 
-        // The user only changes the hue (not the saturation)
+        // The user only changes the hue (not the saturation), then the value
+        // round-trips through RGB as in the real rendering path.
         let hue_only_edit = egui::ecolor::Hsva::new(90.0 / 360.0, current.s, current.v, current.a);
+        let rgb = hsva_srgb(hue_only_edit);
+        let round_tripped = srgb_hsva(rgb);
 
-        let displayed = wheel_display_hsv(hue_only_edit, remembered);
+        let displayed = wheel_display_hsv(round_tripped, remembered);
 
-        // La teinte mémorisée est conservée, la couleur reste achromatique
+        // The remembered hue is preserved, the colour stays achromatic.
         assert!((displayed.h - 120.0 / 360.0).abs() < 1e-6);
         assert!((displayed.s - 0.0).abs() < 1e-6);
         assert!((displayed.v - 0.5).abs() < 1e-6);
@@ -6934,7 +6938,7 @@ mod color_wheel_tests {
     fn wheel_keeps_remembered_hue_for_grey_after_rgb_round_trip() {
         let remembered = (120.0 / 360.0, 0.8);
 
-        // Un gris choisi avec la teinte mémorisée
+        // A grey picked with the remembered hue.
         let grey = egui::ecolor::Hsva::new(120.0 / 360.0, 0.0, 0.5, 1.0);
 
         // RGB round-trip as in the real rendering path
@@ -6943,9 +6947,26 @@ mod color_wheel_tests {
 
         let displayed = wheel_display_hsv(current, remembered);
 
-        // La teinte mémorisée est conservée, la saturation reste 0
+        // The remembered hue is preserved, saturation stays 0.
         assert!((displayed.h - 120.0 / 360.0).abs() < 1e-6);
         assert!((displayed.s - 0.0).abs() < 1e-6);
         assert!((displayed.v - 0.5).abs() < 1e-6);
+    }
+    #[test]
+    fn wheel_press_on_triangle_corner_is_not_a_ring_hit() {
+        let center = egui::Pos2::new(100.0, 100.0);
+        let inner = 100.0;
+
+        // Triangle corners sit at 0.98 * inner, inside the old `inner - 3.0` band.
+        let corner = center + vec2(inner * 0.98, 0.0);
+        assert!(!wheel_press_is_ring(corner, center, inner));
+
+        // A press on the ring itself is a ring hit.
+        let ring = center + vec2(inner + 1.0, 0.0);
+        assert!(wheel_press_is_ring(ring, center, inner));
+
+        // A press inside the triangle is not.
+        let inside = center + vec2(inner * 0.5, 0.0);
+        assert!(!wheel_press_is_ring(inside, center, inner));
     }
 }
