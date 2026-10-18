@@ -3954,8 +3954,9 @@ fn set_tool_color(app: &mut PhotocraftApp, bg_active: bool, color: [f32; 4]) {
     }
 }
 /// Whether a press at `origin` targets the hue ring rather than the SV triangle.
-fn wheel_press_is_ring(origin: egui::Pos2, center: egui::Pos2, inner: f32) -> bool {
-    (origin - center).length() >= inner
+fn wheel_press_is_ring(origin: egui::Pos2, center: egui::Pos2, inner: f32, outer: f32) -> Option<bool> {
+    let distance = (origin - center).length();
+    if distance > outer { None } else { Some(distance >= inner) }
 }
 /// Circular hue/saturation wheel with a brightness slider; an alternative to the SV field.
 fn color_wheel(app: &mut PhotocraftApp, ui: &mut egui::Ui, bg_active: bool) {
@@ -4074,47 +4075,59 @@ fn color_wheel(app: &mut PhotocraftApp, ui: &mut egui::Ui, bg_active: bool) {
     ui.painter().circle_stroke(marker, 5.0, Stroke::new(1.5, Color32::from_black_alpha(160)));
 
     // One interaction area: ring changes hue, triangle changes saturation/brightness.
+    // One interaction area: ring changes hue, triangle changes saturation/brightness.
     let active = area_resp.dragged() || area_resp.clicked();
     if active && let Some(p) = area_resp.interact_pointer_pos() {
         let offset = p - center;
         let angle = (offset.y.atan2(offset.x) / std::f32::consts::TAU + 1.0) % 1.0;
-        let origin = ui.input(|i| i.pointer.press_origin()).unwrap_or(p);
-        if wheel_press_is_ring(origin, center, inner) {
-            hsva.h = angle;
-        } else {
-            // Barycentric coordinates in the triangle.
-            let ax = hue_vertex.x;
-            let ay = hue_vertex.y;
-            let bx = white_vertex.x;
-            let by = white_vertex.y;
-            let cx = black_vertex.x;
-            let cy = black_vertex.y;
+        // `press_origin` is cleared on the release frame, so remember where the
+        // press began and classify the click by that position.
+        if let Some(origin) = ui.input(|i| i.pointer.press_origin()) {
+            app.ui.color_panel.wheel_press_origin = Some(origin);
+        }
+        let origin = app.ui.color_panel.wheel_press_origin.unwrap_or(p);
+        match wheel_press_is_ring(origin, center, inner, outer) {
+            Some(true) => hsva.h = angle,
+            Some(false) => {
+                // Barycentric coordinates in the triangle.
+                let ax = hue_vertex.x;
+                let ay = hue_vertex.y;
+                let bx = white_vertex.x;
+                let by = white_vertex.y;
+                let cx = black_vertex.x;
+                let cy = black_vertex.y;
 
-            let denominator = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy);
-            if denominator.abs() > f32::EPSILON {
-                let mut weight_hue = ((by - cy) * (p.x - cx) + (cx - bx) * (p.y - cy)) / denominator;
-                let mut weight_white = ((cy - ay) * (p.x - cx) + (ax - cx) * (p.y - cy)) / denominator;
-                let mut weight_black = 1.0 - weight_hue - weight_white;
-                // Clamp the point into the triangle.
-                let minimum = weight_hue.min(weight_white).min(weight_black);
-                if minimum < 0.0 {
-                    weight_hue -= minimum;
-                    weight_white -= minimum;
-                    weight_black -= minimum;
+                let denominator = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy);
+                if denominator.abs() > f32::EPSILON {
+                    let mut weight_hue = ((by - cy) * (p.x - cx) + (cx - bx) * (p.y - cy)) / denominator;
+                    let mut weight_white = ((cy - ay) * (p.x - cx) + (ax - cx) * (p.y - cy)) / denominator;
+                    let mut weight_black = 1.0 - weight_hue - weight_white;
+                    // Clamp the point into the triangle.
+                    let minimum = weight_hue.min(weight_white).min(weight_black);
+                    if minimum < 0.0 {
+                        weight_hue -= minimum;
+                        weight_white -= minimum;
+                        weight_black -= minimum;
+                    }
+                    let total = weight_hue + weight_white + weight_black;
+                    weight_hue /= total;
+                    weight_white /= total;
+                    weight_black /= total;
+
+                    hsva.v = 1.0 - weight_black;
+                    hsva.s = if weight_hue + weight_white > f32::EPSILON { weight_hue / (weight_hue + weight_white) } else { 0.0 };
                 }
-                let total = weight_hue + weight_white + weight_black;
-                weight_hue /= total;
-                weight_white /= total;
-                weight_black /= total;
-
-                hsva.v = 1.0 - weight_black;
-                hsva.s = if weight_hue + weight_white > f32::EPSILON { weight_hue / (weight_hue + weight_white) } else { 0.0 };
             }
+            // Press outside the painted wheel: ignore it.
+            None => {}
         }
 
         let color = hsva_srgb(hsva);
         set_tool_color(app, bg_active, color);
         ui.data_mut(|d| d.insert_temp(wheel_key, (hsva.h, hsva.s)));
+    }
+    if !area_resp.is_pointer_button_down_on() && !area_resp.clicked() {
+        app.ui.color_panel.wheel_press_origin = None;
     }
 
     let hue_angle = hsva.h * std::f32::consts::TAU;
@@ -6956,17 +6969,22 @@ mod color_wheel_tests {
     fn wheel_press_on_triangle_corner_is_not_a_ring_hit() {
         let center = egui::Pos2::new(100.0, 100.0);
         let inner = 100.0;
+        let outer = inner + 20.0;
 
-        // Triangle corners sit at 0.98 * inner, inside the old `inner - 3.0` band.
+        // Triangle corners sit at 0.98 * inner, inside the ring.
         let corner = center + vec2(inner * 0.98, 0.0);
-        assert!(!wheel_press_is_ring(corner, center, inner));
+        assert_eq!(wheel_press_is_ring(corner, center, inner, outer), Some(false));
 
         // A press on the ring itself is a ring hit.
         let ring = center + vec2(inner + 1.0, 0.0);
-        assert!(wheel_press_is_ring(ring, center, inner));
+        assert_eq!(wheel_press_is_ring(ring, center, inner, outer), Some(true));
 
         // A press inside the triangle is not.
         let inside = center + vec2(inner * 0.5, 0.0);
-        assert!(!wheel_press_is_ring(inside, center, inner));
+        assert_eq!(wheel_press_is_ring(inside, center, inner, outer), Some(false));
+
+        // A press beyond the painted wheel is ignored.
+        let outside = center + vec2(outer + 1.0, 0.0);
+        assert_eq!(wheel_press_is_ring(outside, center, inner, outer), None);
     }
 }
