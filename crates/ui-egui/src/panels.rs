@@ -4025,7 +4025,6 @@ fn color_wheel(app: &mut PhotocraftApp, ui: &mut egui::Ui, bg_active: bool) {
     let ring_w = 18.0;
     let inner = outer - ring_w - 2.0;
 
-    // Hue ring.
     let segments = 96;
     let mut ring = egui::Mesh::default();
     for k in 0..=segments {
@@ -4064,7 +4063,6 @@ fn color_wheel(app: &mut PhotocraftApp, ui: &mut egui::Ui, bg_active: bool) {
     triangle.add_triangle(hue_index, white_index, black_index);
     ui.painter().add(triangle);
 
-    // Current saturation/brightness marker.
     let v = hsva.v.clamp(0.0, 1.0);
     let s = hsva.s.clamp(0.0, 1.0);
     let hue_offset = hue_vertex - center;
@@ -4084,7 +4082,6 @@ fn color_wheel(app: &mut PhotocraftApp, ui: &mut egui::Ui, bg_active: bool) {
         if distance >= inner - 3.0 {
             hsva.h = angle;
         } else {
-            // Barycentric coordinates in the triangle.
             let ax = hue_vertex.x;
             let ay = hue_vertex.y;
             let bx = white_vertex.x;
@@ -4098,7 +4095,6 @@ fn color_wheel(app: &mut PhotocraftApp, ui: &mut egui::Ui, bg_active: bool) {
                 let mut weight_white = ((cy - ay) * (p.x - cx) + (ax - cx) * (p.y - cy)) / denominator;
                 let mut weight_black = 1.0 - weight_hue - weight_white;
 
-                // Clamp the point into the triangle.
                 let minimum = weight_hue.min(weight_white).min(weight_black);
                 if minimum < 0.0 {
                     weight_hue -= minimum;
@@ -4120,7 +4116,6 @@ fn color_wheel(app: &mut PhotocraftApp, ui: &mut egui::Ui, bg_active: bool) {
         ui.data_mut(|d| d.insert_temp(wheel_key, (hsva.h, hsva.s)));
     }
 
-    // Hue marker, drawn last.
     let hue_angle = hsva.h * std::f32::consts::TAU;
     let direction = vec2(hue_angle.cos(), hue_angle.sin());
     let hue_marker = center + direction * (inner + ring_w / 2.0);
@@ -6925,7 +6920,7 @@ mod color_wheel_tests {
         let current = egui::ecolor::Hsva::new(240.0 / 360.0, 0.0, 0.5, 1.0);
         let remembered = (120.0 / 360.0, 0.8);
 
-        // L'utilisateur ne change que le hue (pas la saturation)
+        // The user only changes the hue (not the saturation)
         let hue_only_edit = egui::ecolor::Hsva::new(90.0 / 360.0, current.s, current.v, current.a);
 
         let displayed = wheel_display_hsv(hue_only_edit, remembered);
@@ -6942,7 +6937,7 @@ mod color_wheel_tests {
         // Un gris choisi avec la teinte mémorisée
         let grey = egui::ecolor::Hsva::new(120.0 / 360.0, 0.0, 0.5, 1.0);
 
-        // Aller-retour RGB comme dans le vrai chemin de rendu
+        // RGB round-trip as in the real rendering path
         let rgb = hsva_srgb(grey);
         let current = srgb_hsva(rgb);
 
